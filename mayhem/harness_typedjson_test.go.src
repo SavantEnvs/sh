@@ -1,0 +1,42 @@
+//go:build go1.18
+
+// mayhem harness — mvdan.cc/sh/v3/syntax/typedjson.Decode.
+//
+// Fuzzes the typed-JSON decoder: reflection-driven decode of an arbitrary JSON document into a
+// syntax.Node tree (syntax/typedjson/json.go), then re-encodes the decoded node through the real
+// printer to also exercise whatever tree Decode manages to build.
+//
+// WHY THIS EXISTS instead of building upstream's FuzzDecode (syntax/typedjson/json_test.go) directly:
+// upstream's FuzzDecode does `os.ReadFile(filepath.Join("testdata", "roundtrip", "file.json"))` +
+// `qt.Assert(f, qt.IsNil(err))` (an f.Fatal-equivalent) OUTSIDE f.Fuzz, purely to build one seed via
+// f.Add. Under go-118-fuzz-build the generated entrypoint still runs that top-level FuzzDecode(f) body
+// once at process start — and Mayhem runs the target from its own writable cwd, not /mayhem/syntax/
+// typedjson, so that relative read fails immediately and the assertion aborts the whole binary before
+// a single input is fuzzed (0 edges, "always crashes"). Reading an ABSOLUTE image path instead is
+// forbidden (SPEC §6.2 item 13). So this harness drops that setup entirely and takes its bytes only
+// from the fuzzer; the real seed corpus (including a copy of upstream's file.json) ships via the
+// Mayhemfile `testsuite:` directive instead (docs/seed-corpus.md).
+//
+// This file is committed as `.go.src` (a non-.go name) so it is never picked up as a package file by
+// `go build`/`go test`; mayhem/build.sh copies it into the syntax/typedjson/ package as a real
+// _test.go file only for the go-118-fuzz-build step.
+
+package typedjson
+
+import (
+	"bytes"
+	"io"
+	"testing"
+)
+
+func FuzzMayhemTypedJSON(f *testing.F) {
+	f.Fuzz(func(t *testing.T, data []byte) {
+		node, err := Decode(bytes.NewReader(data))
+		if err != nil {
+			// Malformed/unknown-shape JSON is an expected outcome, not a finding.
+			return
+		}
+		// Drive the encoder too, over whatever node Decode produced.
+		_ = Encode(io.Discard, node)
+	})
+}

@@ -1,0 +1,8 @@
+project: savantenvs/sh
+target: fuzz_parseprint
+testsuite:
+  - https://$MAYHEM_DOMAIN/$MAYHEM_PROJECT/$MAYHEM_TARGET/testsuite.tar
+  - file://mayhem/fuzz_parseprint/testsuite
+cmds:
+  - cmd: /mayhem/fuzz_parseprint
+    libfuzzer: true

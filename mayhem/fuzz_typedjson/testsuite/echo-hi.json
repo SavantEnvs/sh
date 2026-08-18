@@ -1,0 +1,1 @@
+{"Type":"File","Stmts":[{"Cmd":{"Type":"CallExpr","Args":[{"Parts":[{"Type":"Lit","Value":"echo"}]},{"Parts":[{"Type":"Lit","Value":"hi"}]}]}}]}
