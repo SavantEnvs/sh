@@ -1,0 +1,57 @@
+//go:build go1.18
+
+// mayhem harness — mvdan.cc/sh/v3/syntax parser + printer round-trip.
+//
+// Fuzzes syntax.NewParser(...).Parse() (the bash/POSIX/mksh grammar lexer+parser) followed by
+// Simplify + syntax.NewPrinter().Print() (the shfmt printer) — the same core round-trip upstream's
+// own FuzzParsePrint (syntax/fuzz_test.go) exercises, over the whole shell grammar surface.
+//
+// WHY THIS EXISTS instead of building upstream's FuzzParsePrint directly: upstream's fuzz function
+// takes a dozen typed parameters (langVariant, keepComments, printer options, ...) seeded from Go's
+// native fuzz corpus encoding. go-118-fuzz-build CAN decode multi-argument corpora via go-fuzz-headers,
+// but keeping this harness to a single []byte argument keeps the seed corpus a plain byte format (the
+// canonical `testsuite:` form — real .sh files, no encoded-corpus wrapper) and keeps the harness free
+// of any setup that could fail outside `go test` (upstream's FuzzParsePrint has no file I/O either, but
+// pinning to a single argument avoids relying on go-118-fuzz-build's multi-arg decode path at all). We
+// fix the printer options to representative defaults (language variant from the first input byte, KeepComments on, Simplify
+// applied) so every input byte drives the PARSER, which is the real fuzzed surface here.
+//
+// No file I/O: bytes come only from the fuzzer; starter seeds are supplied by Mayhem via the
+// Mayhemfile `testsuite:` directive (docs/seed-corpus.md).
+//
+// This file is committed as `.go.src` (a non-.go name) so it is never picked up as a package file by
+// `go build`/`go test`; mayhem/build.sh copies it into the syntax/ package as a real _test.go file
+// only for the go-118-fuzz-build step.
+
+package syntax
+
+import (
+	"bytes"
+	"io"
+	"testing"
+)
+
+func FuzzMayhemParsePrint(f *testing.F) {
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// The first byte picks the language variant (nested parameter expansions such as
+		// ${${x}y} only parse under Zsh); the rest is the script. Empty input is rejected.
+		if len(data) == 0 {
+			return
+		}
+		variants := [...]LangVariant{LangBash, LangPOSIX, LangMirBSDKorn, LangBats, LangZsh}
+		lang := variants[int(data[0])%len(variants)]
+		parser := NewParser(KeepComments(true), Variant(lang))
+		prog, err := parser.Parse(bytes.NewReader(data[1:]), "")
+		if err != nil {
+			// Not valid shell syntax under this variant — expected, not a finding.
+			return
+		}
+
+		// Exercise the simplifier (constant-folds / drops redundant syntax) ahead of printing —
+		// another pass over the parsed AST that upstream's own fuzz target also drives.
+		Simplify(prog)
+
+		printer := NewPrinter()
+		_ = printer.Print(io.Discard, prog)
+	})
+}
